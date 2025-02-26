@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NES Sound and Music Composer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        .section {
+            margin-bottom: 20px;
+        }
+        .section h2 {
+            margin-bottom: 10px;
+        }
+        .buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <h1>NES Sound and Music Composer</h1>
+    <div class="section">
+        <h2>Sound Effects</h2>
+        <div class="buttons" id="sound-effects"></div>
+    </div>
+    <div class="section">
+        <h2>Themes</h2>
+        <div class="buttons" id="themes"></div>
+    </div>
+    <script>
+        // Initialize AudioContext
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        // Create PeriodicWave for NES square wave duty cycles (12.5%, 25%, 50%, 75%)
+        function createSquareWave(duty) {
+            const N = 100; // Number of harmonics for waveform
+            const real = new Float32Array(N + 1);
+            const imag = new Float32Array(N + 1);
+            for (let k = 1; k <= N; k++) {
+                imag[k] = (2 / (k * Math.PI)) * Math.sin(k * Math.PI * duty);
+            }
+            return audioCtx.createPeriodicWave(real, imag, { disableNormalization: true });
+        }
+        const dutyCycles = {
+            0: createSquareWave(0.125), // Duty cycle 12.5%
+            1: createSquareWave(0.25),  // Duty cycle 25%
+            2: createSquareWave(0.5),   // Duty cycle 50%
+            3: createSquareWave(0.75)   // Duty cycle 75%
+        };
+
+        // Create 1-second white noise buffer for Noise channel
+        function createNoiseBuffer() {
+            const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate, audioCtx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < data.length; i++) {
+                data[i] = Math.random() * 2 - 1;
+            }
+            return buffer;
+        }
+        const noiseBuffer = createNoiseBuffer();
+
+        // Channel playback functions
+        function playSquareNote(startFreq, endFreq, duty, startVol, endVol, duration, startTime) {
+            const osc = audioCtx.createOscillator();
+            osc.setPeriodicWave(dutyCycles[duty]);
+            osc.frequency.setValueAtTime(startFreq, startTime);
+            if (endFreq !== undefined) {
+                osc.frequency.linearRampToValueAtTime(endFreq, startTime + duration);
+            }
+            const gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(startVol, startTime);
+            gain.gain.linearRampToValueAtTime(endVol !== undefined ? endVol : 0, startTime + duration);
+            osc.connect(gain).connect(audioCtx.destination);
+            osc.start(startTime);
+            osc.stop(startTime + duration);
+            return osc; // Return for potential stopping
+        }
+
+        function playTriangleNote(freq, startVol, endVol, duration, startTime) {
+            const osc = audioCtx.createOscillator();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(freq, startTime);
+            const gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(startVol, startTime);
+            gain.gain.linearRampToValueAtTime(endVol !== undefined ? endVol : 0, startTime + duration);
+            osc.connect(gain).connect(audioCtx.destination);
+            osc.start(startTime);
+            osc.stop(startTime + duration);
+            return osc;
+        }
+
+        function playNoiseNote(playbackRate, startVol, endVol, duration, startTime) {
+            const source = audioCtx.createBufferSource();
+            source.buffer = noiseBuffer;
+            source.loop = true;
+            source.playbackRate.setValueAtTime(playbackRate, startTime);
+            const gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(startVol, startTime);
+            gain.gain.linearRampToValueAtTime(endVol !== undefined ? endVol : 0, startTime + duration);
+            source.connect(gain).connect(audioCtx.destination);
+            source.start(startTime);
+            source.stop(startTime + duration);
+            return source;
+        }
+
+        // Sound effects (10 distinct NES-style effects)
+        function playJumpSound() {
+            const now = audioCtx.currentTime;
+            playSquareNote(200, 400, 1, 0.5, 0, 0.1, now); // Rising pitch
+        }
+
+        function playExplosionSound() {
+            const now = audioCtx.currentTime;
+            playNoiseNote(1, 0.5, 0, 0.2, now); // Decaying noise burst
+        }
+
+        function playPowerUpSound() {
+            const now = audioCtx.currentTime;
+            playSquareNote(262, undefined, 1, 0.5, 0, 0.05, now);      // C4
+            playSquareNote(330, undefined, 1, 0.5, 0, 0.05, now + 0.05); // E4
+            playSquareNote(392, undefined, 1, 0.5, 0, 0.05, now + 0.1);  // G4
+        }
+
+        function playCoinSound() {
+            const now = audioCtx.currentTime;
+            playSquareNote(1000, undefined, 1, 0.5, 0, 0.05, now); // High-pitched blip
+        }
+
+        function playBlipSound() {
+            const now = audioCtx.currentTime;
+            playSquareNote(500, undefined, 1, 0.5, 0, 0.02, now); // Short blip
+        }
+
+        function playLaserSound() {
+            const now = audioCtx.currentTime;
+            playSquareNote(800, 200, 1, 0.5, 0, 0.1, now); // Descending pitch
+        }
+
+        function playHitSound() {
+            const now = audioCtx.currentTime;
+            playSquareNote(100, undefined, 1, 0.5, 0, 0.1, now); // Low thud
+        }
+
+        function playSelectSound() {
+            const now = audioCtx.currentTime;
+            playSquareNote(400, undefined, 1, 0.5, 0, 0.05, now); // Menu select
+        }
+
+        function playErrorSound() {
+            const now = audioCtx.currentTime;
+            playSquareNote(200, undefined, 0, 0.5, 0, 0.2, now); // Low buzz, 12.5% duty
+        }
+
+        function playVictorySound() {
+            const now = audioCtx.currentTime;
+            playSquareNote(262, undefined, 1, 0.5, 0, 0.1, now);      // C4
+            playSquareNote(392, undefined, 1, 0.5, 0, 0.1, now + 0.1); // G4
+            playSquareNote(523, undefined, 1, 0.5, 0, 0.1, now + 0.2); // C5
+        }
+
+        // Theme playback with stop functionality
+        function getFrequency(note) {
+            return 440 * Math.pow(2, (note - 69) / 12); // MIDI note to frequency
+        }
+
+        class ThemePlayer {
+            constructor() {
+                this.activeNodes = []; // Track all playing nodes
+                this.isPlaying = false;
+            }
+
+            playTheme(notes) {
+                if (this.isPlaying) this.stop();
+                const now = audioCtx.currentTime;
+                this.isPlaying = true;
+                notes.forEach(note => {
+                    let node;
+                    if (note.type === 'square1') {
+                        node = playSquareNote(
+                            getFrequency(note.note),
+                            undefined,
+                            1,
+                            0.5,
+                            0,
+                            note.duration,
+                            now + note.time
+                        );
+                    } else if (note.type === 'triangle') {
+                        node = playTriangleNote(
+                            getFrequency(note.note),
+                            0.5,
+                            0,
+                            note.duration,
+                            now + note.time
+                        );
+                    }
+                    this.activeNodes.push(node);
+                });
+            }
+
+            stop() {
+                this.activeNodes.forEach(node => {
+                    try {
+                        node.stop(audioCtx.currentTime);
+                    } catch (e) {}
+                });
+                this.activeNodes = [];
+                this.isPlaying = false;
+            }
+        }
+
+        const themePlayers = [new ThemePlayer(), new ThemePlayer(), new ThemePlayer()];
+
+        // Theme definitions
+        const theme1 = [
+            // Square1: C4, E4, G4, E4
+            { type: 'square1', note: 60, time: 0, duration: 0.25 },
+            { type: 'square1', note: 64, time: 0.25, duration: 0.25 },
+            { type: 'square1', note: 67, time: 0.5, duration: 0.25 },
+            { type: 'square1', note: 64, time: 0.75, duration: 0.25 },
+            // Triangle: C3, G3
+            { type: 'triangle', note: 48, time: 0, duration: 0.5 },
+            { type: 'triangle', note: 55, time: 0.5, duration: 0.5 }
+        ];
+
+        const theme2 = [
+            // Square1: A4, G4, F4, G4
+            { type: 'square1', note: 69, time: 0, duration: 0.25 },
+            { type: 'square1', note: 67, time: 0.25, duration: 0.25 },
+            { type: 'square1', note: 65, time: 0.5, duration: 0.25 },
+            { type: 'square1', note: 67, time: 0.75, duration: 0.25 },
+            // Triangle: A3, F3
+            { type: 'triangle', note: 57, time: 0, duration: 0.5 },
+            { type: 'triangle', note: 53, time: 0.5, duration: 0.5 }
+        ];
+
+        const theme3 = [
+            // Square1: C4, D4, E4, F4, G4, F4, E4, D4, C4
+            { type: 'square1', note: 60, time: 0, duration: 0.125 },
+            { type: 'square1', note: 62, time: 0.125, duration: 0.125 },
+            { type: 'square1', note: 64, time: 0.25, duration: 0.125 },
+            { type: 'square1', note: 65, time: 0.375, duration: 0.125 },
+            { type: 'square1', note: 67, time: 0.5, duration: 0.125 },
+            { type: 'square1', note: 65, time: 0.625, duration: 0.125 },
+            { type: 'square1', note: 64, time: 0.75, duration: 0.125 },
+            { type: 'square1', note: 62, time: 0.875, duration: 0.125 },
+            { type: 'square1', note: 60, time: 1, duration: 0.125 },
+            // Triangle: C3
+            { type: 'triangle', note: 48, time: 0, duration: 1.125 }
+        ];
+
+        function playTheme1() { themePlayers[0].playTheme(theme1); }
+        function playTheme2() { themePlayers[1].playTheme(theme2); }
+        function playTheme3() { themePlayers[2].playTheme(theme3); }
+        function stopTheme1() { themePlayers[0].stop(); }
+        function stopTheme2() { themePlayers[1].stop(); }
+        function stopTheme3() { themePlayers[2].stop(); }
+
+        // UI setup
+        const soundEffects = [
+            { name: 'Jump', func: playJumpSound },
+            { name: 'Explosion', func: playExplosionSound },
+            { name: 'Power Up', func: playPowerUpSound },
+            { name: 'Coin', func: playCoinSound },
+            { name: 'Blip', func: playBlipSound },
+            { name: 'Laser', func: playLaserSound },
+            { name: 'Hit', func: playHitSound },
+            { name: 'Select', func: playSelectSound },
+            { name: 'Error', func: playErrorSound },
+            { name: 'Victory', func: playVictorySound }
+        ];
+
+        const themes = [
+            { name: 'Theme 1', playFunc: playTheme1, stopFunc: stopTheme1, player: themePlayers[0] },
+            { name: 'Theme 2', playFunc: playTheme2, stopFunc: stopTheme2, player: themePlayers[1] },
+            { name: 'Theme 3', playFunc: playTheme3, stopFunc: stopTheme3, player: themePlayers[2] }
+        ];
+
+        const soundEffectsDiv = document.getElementById('sound-effects');
+        soundEffects.forEach(effect => {
+            const button = document.createElement('button');
+            button.textContent = effect.name;
+            button.addEventListener('click', effect.func);
+            soundEffectsDiv.appendChild(button);
+        });
+
+        const themesDiv = document.getElementById('themes');
+        themes.forEach(theme => {
+            const playButton = document.createElement('button');
+            playButton.textContent = `Play ${theme.name}`;
+            const stopButton = document.createElement('button');
+            stopButton.textContent = `Stop ${theme.name}`;
+            stopButton.disabled = true;
+
+            playButton.addEventListener('click', () => {
+                theme.playFunc();
+                playButton.disabled = true;
+                stopButton.disabled = false;
+                setTimeout(() => {
+                    if (theme.player.isPlaying) {
+                        playButton.disabled = false;
+                        stopButton.disabled = true;
+                    }
+                }, 1250); // Max theme length + buffer
+            });
+            stopButton.addEventListener('click', () => {
+                theme.stopFunc();
+                playButton.disabled = false;
+                stopButton.disabled = true;
+            });
+
+            themesDiv.appendChild(playButton);
+            themesDiv.appendChild(stopButton);
+        });
+    </script>
+</body>
+</html>

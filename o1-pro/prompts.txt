@@ -1,0 +1,42 @@
+You are a highly experienced software engineer, music composer, and sound programmer with a deep understanding of the NES audio system (Square 1, Square 2, Triangle, and Noise channels). Generate a single, comprehensive, fully self-contained code implementation for a “NES Sound and Music Composer.” This must be a one-shot solution requiring no additional edits. The code should run as-is, from a single file if possible, and must be as close as possible to authentic NES-style sound.
+
+Requirements:
+
+Language/Framework: Use any programming language or environment you prefer (JavaScript, Python, C++, etc.) as long as it:
+
+Requires no external assets (images, sound files, etc.).
+Avoids dependencies beyond standard libraries or core APIs, whenever possible.
+Can compile or run successfully as presented.
+Authentic NES Sound:
+
+The code must emulate NES audio channels (Square 1, Square 2, Triangle, Noise) or approximate them as closely as possible in your chosen environment.
+Each channel should be configurable (pitch, volume, duty cycle, etc.) so that it can produce NES-like sound effects and music phrases.
+Sound Effects:
+
+Implement at least 10 distinct, precomposed NES-style sound effects (e.g., a jump sound, an explosion, a power-up, a coin pickup, a short blip, etc.).
+Provide a simple way to preview or trigger each of these effects individually (e.g., with UI buttons, a command prompt menu, or function calls).
+Music:
+
+Include 3 short, precomposed NES-style theme songs (simple loops that show off chord changes or melodic lines).
+Provide a way to play each theme individually, plus a way to stop them.
+Interface/Interaction:
+
+Present some form of interactive interface (could be text-based, a minimal GUI, or a simple Web UI) that:
+Lists the 10+ sound effects and lets the user play each one.
+Lists the 3 short theme songs and provides controls to play/stop them.
+Keep it straightforward: the primary goal is verifying the sound playback.
+Single Source:
+
+Supply all code in one block, with correct syntax and no omissions (no ellipses).
+It must be directly runnable or compilable, with instructions if necessary (e.g., “Save this as ‘main.py’ and run it with Python 3.9”).
+NES Emulation Detail:
+
+In your code, show how you shape waveforms to approximate the NES channels.
+Include any relevant comments or brief explanations for how each part works, so the structure is clear.
+No Summaries or Disclaimers:
+
+Directly provide the code. Avoid disclaimers about feasibility, disclaimers about licensing, or “you should do X” disclaimers.
+Output the full solution in a single chunk.
+Goal: Produce this entire composer system in one shot—no partial code, no placeholders, no external file references. Everything must be included, giving us a final product that can be tested immediately.
+
+Finally: Double-check that each requirement is met before presenting your solution—particularly that the code includes at least 10 precomposed NES-like sound effects and 3 short NES-like theme songs (with a method to trigger and stop them). The solution should be ready to execute with no further edits.

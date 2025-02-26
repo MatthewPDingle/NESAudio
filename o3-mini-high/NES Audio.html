@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>NES Sound and Music Composer</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; background: #222; color: #eee; }
+    h1, h2 { text-align: center; }
+    button { margin: 5px; padding: 10px 15px; background: #444; border: none; color: #eee; cursor: pointer; }
+    button:hover { background: #666; }
+    .section { margin-bottom: 30px; text-align: center; }
+  </style>
+</head>
+<body>
+  <h1>NES Sound and Music Composer</h1>
+  <div class="section">
+    <h2>Sound Effects</h2>
+    <div id="sfx-buttons"></div>
+  </div>
+  <div class="section">
+    <h2>Theme Songs</h2>
+    <div id="theme-buttons"></div>
+  </div>
+  <script>
+    // Initialize the Audio Context
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    // Create a custom square wave with adjustable duty cycle using Fourier series.
+    function createCustomSquareWave(duty) {
+      const nHarmonics = 20;
+      const real = new Float32Array(nHarmonics + 1);
+      const imag = new Float32Array(nHarmonics + 1);
+      real[0] = 0; imag[0] = 0;
+      for (let n = 1; n <= nHarmonics; n++) {
+        // Fourier coefficient for a pulse wave with duty cycle "duty"
+        real[n] = Math.sin(n * Math.PI * duty) / (n * Math.PI);
+        imag[n] = 0;
+      }
+      return audioCtx.createPeriodicWave(real, imag);
+    }
+
+    // Play a square wave note with given frequency, duration, duty cycle, and volume.
+    function playSquareNote(frequency, duration, duty, volume) {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      const wave = createCustomSquareWave(duty);
+      osc.setPeriodicWave(wave);
+      osc.frequency.setValueAtTime(frequency, audioCtx.currentTime);
+      gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + duration);
+    }
+
+    // Play a triangle wave note with given frequency, duration, and volume.
+    function playTriangleNote(frequency, duration, volume) {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(frequency, audioCtx.currentTime);
+      gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + duration);
+    }
+
+    // Play a noise burst using a generated audio buffer.
+    function playNoise(duration, volume, filterFrequency) {
+      const bufferSize = audioCtx.sampleRate * duration;
+      const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+      const noise = audioCtx.createBufferSource();
+      noise.buffer = buffer;
+      noise.loop = false;
+      const gain = audioCtx.createGain();
+      gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+      if (filterFrequency) {
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(filterFrequency, audioCtx.currentTime);
+        noise.connect(filter);
+        filter.connect(gain);
+      } else {
+        noise.connect(gain);
+      }
+      gain.connect(audioCtx.destination);
+      noise.start();
+    }
+
+    // ------------------- Sound Effects -------------------
+
+    // Jump: square wave with a quick pitch drop and fade-out.
+    function playJump() {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      const wave = createCustomSquareWave(0.25);
+      osc.setPeriodicWave(wave);
+      osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.3);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+      osc.stop(audioCtx.currentTime + 0.3);
+    }
+
+    // Explosion: a burst of noise with a descending low-pass filter to simulate an explosion.
+    function playExplosion() {
+      const duration = 0.6;
+      const bufferSize = audioCtx.sampleRate * duration;
+      const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+      }
+      const noise = audioCtx.createBufferSource();
+      noise.buffer = buffer;
+      const gain = audioCtx.createGain();
+      gain.gain.setValueAtTime(0.8, audioCtx.currentTime);
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(1200, audioCtx.currentTime);
+      filter.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + duration);
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(audioCtx.destination);
+      noise.start();
+    }
+
+    // Power-Up: a rising square wave that increases in pitch.
+    function playPowerup() {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      const wave = createCustomSquareWave(0.5);
+      osc.setPeriodicWave(wave);
+      osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.5);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+      osc.stop(audioCtx.currentTime + 0.5);
+    }
+
+    // Coin: a short, high-pitched blip using a square wave.
+    function playCoin() {
+      playSquareNote(800, 0.1, 0.5, 0.5);
+    }
+
+    // Blip: a very short note on a triangle wave.
+    function playBlip() {
+      playTriangleNote(1000, 0.08, 0.4);
+    }
+
+    // Laser: a quick descending square wave to mimic a laser sound.
+    function playLaser() {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      const wave = createCustomSquareWave(0.3);
+      osc.setPeriodicWave(wave);
+      osc.frequency.setValueAtTime(1000, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.2);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+      osc.stop(audioCtx.currentTime + 0.2);
+    }
+
+    // Shoot: similar to laser but with a slightly different duty cycle and duration.
+    function playShoot() {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      const wave = createCustomSquareWave(0.4);
+      osc.setPeriodicWave(wave);
+      osc.frequency.setValueAtTime(900, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.frequency.exponentialRampToValueAtTime(300, audioCtx.currentTime + 0.25);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
+      osc.stop(audioCtx.currentTime + 0.25);
+    }
+
+    // Hit: a short, percussive note using a triangle wave.
+    function playHit() {
+      playTriangleNote(600, 0.1, 0.5);
+    }
+
+    // Death: a combination of a descending square tone and noise for a dramatic effect.
+    function playDeath() {
+      playSquareNote(500, 0.3, 0.5, 0.4);
+      setTimeout(() => {
+        playNoise(0.4, 0.6, 800);
+      }, 50);
+    }
+
+    // Splash: a low-pitched square tone with a quick vibrato effect.
+    function playSplash() {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      const wave = createCustomSquareWave(0.6);
+      osc.setPeriodicWave(wave);
+      osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      // Apply a vibrato effect via a secondary oscillator modulating the frequency.
+      const vibrato = audioCtx.createOscillator();
+      vibrato.frequency.setValueAtTime(5, audioCtx.currentTime);
+      const vibratoGain = audioCtx.createGain();
+      vibratoGain.gain.setValueAtTime(20, audioCtx.currentTime);
+      vibrato.connect(vibratoGain);
+      vibratoGain.connect(osc.frequency);
+      vibrato.start();
+      osc.stop(audioCtx.currentTime + 0.4);
+      vibrato.stop(audioCtx.currentTime + 0.4);
+    }
+
+    // ------------------- Theme Songs -------------------
+    // Global array to keep track of scheduled timeouts for looping themes.
+    let currentThemeTimeouts = [];
+
+    // Play a theme song defined as an array of note objects.
+    function playTheme(theme) {
+      stopTheme();
+      // Schedule each note based on its defined startTime.
+      theme.forEach(note => {
+        const timeout = setTimeout(() => {
+          if (note.channel === 'square') {
+            playSquareNote(note.frequency, note.duration, note.duty, note.volume);
+          } else if (note.channel === 'triangle') {
+            playTriangleNote(note.frequency, note.duration, note.volume);
+          } else if (note.channel === 'noise') {
+            playNoise(note.duration, note.volume, note.filter);
+          }
+        }, note.startTime * 1000);
+        currentThemeTimeouts.push(timeout);
+      });
+      // Loop the theme song after its total duration.
+      const lastNote = theme[theme.length - 1];
+      const loopDuration = lastNote.startTime + lastNote.duration;
+      const loopTimeout = setTimeout(() => { playTheme(theme); }, loopDuration * 1000);
+      currentThemeTimeouts.push(loopTimeout);
+    }
+
+    // Stop any currently playing theme song.
+    function stopTheme() {
+      currentThemeTimeouts.forEach(timeout => clearTimeout(timeout));
+      currentThemeTimeouts = [];
+    }
+
+    // Define three short NES-style theme songs.
+    // Theme 1: A simple ascending square wave melody.
+    const theme1 = [
+      { startTime: 0.0, channel: 'square', frequency: 440, duration: 0.3, duty: 0.5, volume: 0.5 },
+      { startTime: 0.4, channel: 'square', frequency: 494, duration: 0.3, duty: 0.5, volume: 0.5 },
+      { startTime: 0.8, channel: 'square', frequency: 523, duration: 0.3, duty: 0.5, volume: 0.5 },
+      { startTime: 1.2, channel: 'square', frequency: 587, duration: 0.3, duty: 0.5, volume: 0.5 },
+      { startTime: 1.6, channel: 'square', frequency: 659, duration: 0.3, duty: 0.5, volume: 0.5 }
+    ];
+
+    // Theme 2: A mellow triangle wave progression.
+    const theme2 = [
+      { startTime: 0.0, channel: 'triangle', frequency: 330, duration: 0.4, volume: 0.4 },
+      { startTime: 0.5, channel: 'triangle', frequency: 392, duration: 0.4, volume: 0.4 },
+      { startTime: 1.0, channel: 'triangle', frequency: 440, duration: 0.4, volume: 0.4 },
+      { startTime: 1.5, channel: 'triangle', frequency: 494, duration: 0.4, volume: 0.4 }
+    ];
+
+    // Theme 3: A mixed theme using square and noise channels.
+    const theme3 = [
+      { startTime: 0.0, channel: 'square', frequency: 523, duration: 0.25, duty: 0.25, volume: 0.5 },
+      { startTime: 0.3, channel: 'noise', duration: 0.2, volume: 0.5, filter: 1000 },
+      { startTime: 0.6, channel: 'square', frequency: 587, duration: 0.25, duty: 0.25, volume: 0.5 },
+      { startTime: 0.9, channel: 'noise', duration: 0.2, volume: 0.5, filter: 1000 },
+      { startTime: 1.2, channel: 'square', frequency: 659, duration: 0.25, duty: 0.25, volume: 0.5 },
+      { startTime: 1.5, channel: 'noise', duration: 0.2, volume: 0.5, filter: 1000 }
+    ];
+
+    // ------------------- UI Setup -------------------
+    // Create buttons for each sound effect.
+    const sfxButtonsDiv = document.getElementById('sfx-buttons');
+    const soundEffects = [
+      { name: 'Jump', action: playJump },
+      { name: 'Explosion', action: playExplosion },
+      { name: 'Power-Up', action: playPowerup },
+      { name: 'Coin', action: playCoin },
+      { name: 'Blip', action: playBlip },
+      { name: 'Laser', action: playLaser },
+      { name: 'Shoot', action: playShoot },
+      { name: 'Hit', action: playHit },
+      { name: 'Death', action: playDeath },
+      { name: 'Splash', action: playSplash }
+    ];
+    soundEffects.forEach(effect => {
+      const btn = document.createElement('button');
+      btn.textContent = effect.name;
+      btn.onclick = () => { effect.action(); };
+      sfxButtonsDiv.appendChild(btn);
+    });
+
+    // Create play/stop buttons for each theme song.
+    const themeButtonsDiv = document.getElementById('theme-buttons');
+    const themes = [
+      { name: 'Theme 1', theme: theme1 },
+      { name: 'Theme 2', theme: theme2 },
+      { name: 'Theme 3', theme: theme3 }
+    ];
+    themes.forEach(th => {
+      const playBtn = document.createElement('button');
+      playBtn.textContent = 'Play ' + th.name;
+      playBtn.onclick = () => { playTheme(th.theme); };
+      themeButtonsDiv.appendChild(playBtn);
+
+      const stopBtn = document.createElement('button');
+      stopBtn.textContent = 'Stop ' + th.name;
+      stopBtn.onclick = stopTheme;
+      themeButtonsDiv.appendChild(stopBtn);
+    });
+  </script>
+</body>
+</html>

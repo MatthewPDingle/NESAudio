@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NES Sound and Music Composer</title>
+<style>
+  body {
+    font-family: sans-serif;
+    margin: 20px;
+  }
+  h1, h2 {
+    margin-bottom: 0.3em;
+  }
+  button {
+    margin: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+  }
+  .section {
+    margin-bottom: 20px;
+  }
+</style>
+</head>
+<body>
+
+<h1>NES Sound and Music Composer</h1>
+
+<div class="section">
+  <h2>Sound Effects</h2>
+  <button onclick="playSfxJump()">Jump</button>
+  <button onclick="playSfxExplosion()">Explosion</button>
+  <button onclick="playSfxPowerUp()">Power-Up</button>
+  <button onclick="playSfxCoin()">Coin</button>
+  <button onclick="playSfxBlip()">Blip</button>
+  <button onclick="playSfxLaser()">Laser</button>
+  <button onclick="playSfxHurt()">Hurt</button>
+  <button onclick="playSfxPause()">Pause</button>
+  <button onclick="playSfxConfirm()">Confirm</button>
+  <button onclick="playSfxTeleport()">Teleport</button>
+</div>
+
+<div class="section">
+  <h2>Theme Songs</h2>
+  <button onclick="playSong1()">Play Song 1</button>
+  <button onclick="playSong2()">Play Song 2</button>
+  <button onclick="playSong3()">Play Song 3</button>
+  <button onclick="stopAllSongs()">Stop All Songs</button>
+</div>
+
+<script>
+// ----------------------------------------------------
+// Global Audio Context
+// ----------------------------------------------------
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+// ----------------------------------------------------
+// Periodic Waves for Authentic NES-Style Channels
+// ----------------------------------------------------
+//
+// We'll define approximate NES channel waveforms. NES has two square channels
+// (each can have 4 possible duty cycles), one triangle channel, and one noise channel.
+//
+// createSquareWave(dutyCycle): Creates a PeriodicWave for a square wave with a given duty cycle (0..1).
+// createTriangleWave(): Creates a PeriodicWave approximating the NES triangle channel.
+// createNoiseBuffer(): Creates a short looping buffer of white noise for the NES noise channel.
+//
+// The formula for partials of a square wave is something like (for harmonic n):
+//   amplitude = (4 / (n * Math.PI)) * sin(n * Math.PI * dutyCycle)
+// We use a finite number of harmonics to approximate.
+// The NES triangle is a linear stepping wave at lower bit depth, but we'll approximate with partials here.
+//
+
+function createSquareWave(dutyCycle) {
+  const real = new Float32Array(16);
+  const imag = new Float32Array(16);
+  // For a standard Fourier series approach
+  for (let n = 1; n < 16; n++) {
+    // Square wave partial amplitude * sin(n*pi*duty)
+    // amplitude = 4/(n*pi) * sin(n*pi*dutyCycle)
+    const amplitude = (4 / (n * Math.PI)) * Math.sin(n * Math.PI * dutyCycle);
+    real[n] = 0;      // Square is all sine terms in theory, so real=0
+    imag[n] = amplitude;
+  }
+  return audioCtx.createPeriodicWave(real, imag, {disableNormalization: true});
+}
+
+function createTriangleWave() {
+  // NES triangle channel is a fixed 4-bit stepping wave in reality,
+  // but we can approximate with a standard triangle partial series:
+  // a_n = (8 / (Math.PI^2)) * (1 / (2k+1)^2), alternating sign, only odd partials.
+  const real = new Float32Array(16);
+  const imag = new Float32Array(16);
+  for (let k = 0; k < 16; k++) {
+    // Only odd harmonics
+    const n = 2*k + 1;
+    // sign alternates with each odd harmonic
+    const sign = (k % 2 === 0) ? 1 : -1;
+    // amplitude for triangle partial
+    const amplitude = (8 / (Math.PI * Math.PI)) * (1 / (n * n)) * sign;
+    imag[n] = amplitude;
+  }
+  return audioCtx.createPeriodicWave(real, imag, {disableNormalization: true});
+}
+
+function createNoiseBuffer() {
+  // Create 1 second of random noise. The NES noise is actually an LFSR,
+  // but we'll approximate with white noise here for simplicity.
+  const sampleRate = audioCtx.sampleRate;
+  const bufferSize = sampleRate; // 1 second
+  const buffer = audioCtx.createBuffer(1, bufferSize, sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) {
+    data[i] = Math.random() * 2 - 1;
+  }
+  return buffer;
+}
+
+// Precompute our PeriodicWaves:
+const squareWave12 = createSquareWave(0.125);  // Example for Square 1
+const squareWave50 = createSquareWave(0.5);    // Example for Square 2
+const triangleWave = createTriangleWave();
+const noiseBuffer  = createNoiseBuffer();
+
+// ----------------------------------------------------
+// Helper Functions for Channel-Like Playback
+// ----------------------------------------------------
+//
+// createSquareOsc(dutyWave, frequency, duration, volume):
+//   Creates an oscillator using a custom square wave, sets freq, applies an envelope, auto-stops.
+//
+// createTriangleOsc(frequency, duration, volume):
+//   Creates a triangle oscillator, sets freq, envelope, auto-stops.
+//
+// createNoise(duration, volume):
+//   Creates a noise buffer source, sets volume envelope, auto-stops.
+//
+
+function createSquareOsc(dutyWave, frequency, duration, volume) {
+  const osc = audioCtx.createOscillator();
+  osc.setPeriodicWave(dutyWave);
+  osc.frequency.value = frequency;
+
+  const gainNode = audioCtx.createGain();
+  gainNode.gain.setValueAtTime(volume, audioCtx.currentTime);
+  // Quick linear fade out
+  gainNode.gain.linearRampToValueAtTime(0.0, audioCtx.currentTime + duration);
+
+  osc.connect(gainNode).connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + duration);
+}
+
+function createTriangleOsc(frequency, duration, volume) {
+  const osc = audioCtx.createOscillator();
+  osc.setPeriodicWave(triangleWave);
+  osc.frequency.value = frequency;
+
+  const gainNode = audioCtx.createGain();
+  gainNode.gain.setValueAtTime(volume, audioCtx.currentTime);
+  gainNode.gain.linearRampToValueAtTime(0, audioCtx.currentTime + duration);
+
+  osc.connect(gainNode).connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + duration);
+}
+
+function createNoise(duration, volume) {
+  const bufferSource = audioCtx.createBufferSource();
+  bufferSource.buffer = noiseBuffer;
+  bufferSource.loop = true; // let it loop for the duration
+
+  const gainNode = audioCtx.createGain();
+  gainNode.gain.setValueAtTime(volume, audioCtx.currentTime);
+  gainNode.gain.linearRampToValueAtTime(0, audioCtx.currentTime + duration);
+
+  bufferSource.connect(gainNode).connect(audioCtx.destination);
+  bufferSource.start();
+  bufferSource.stop(audioCtx.currentTime + duration);
+}
+
+// ----------------------------------------------------
+// 10 Distinct NES-Style Sound Effects
+// ----------------------------------------------------
+//
+// Each function immediately plays a short effect. We can do pitch sweeps, volume envelopes, etc.
+
+// 1) Jump
+function playSfxJump() {
+  // Quick pitch up + fade out
+  const baseFreq = 200;
+  const osc = audioCtx.createOscillator();
+  osc.setPeriodicWave(squareWave50);
+  osc.frequency.setValueAtTime(baseFreq, audioCtx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(baseFreq * 1.8, audioCtx.currentTime + 0.2);
+
+  const gainNode = audioCtx.createGain();
+  gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
+  gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.3);
+
+  osc.connect(gainNode).connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.35);
+}
+
+// 2) Explosion
+function playSfxExplosion() {
+  // Use noise plus a low pitch sweep
+  createNoise(0.5, 0.5);
+  // Add a low square for a thud
+  const osc = audioCtx.createOscillator();
+  osc.setPeriodicWave(squareWave12);
+  osc.frequency.setValueAtTime(50, audioCtx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(20, audioCtx.currentTime + 0.5);
+
+  const gainNode = audioCtx.createGain();
+  gainNode.gain.setValueAtTime(0.6, audioCtx.currentTime);
+  gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.5);
+
+  osc.connect(gainNode).connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.5);
+}
+
+// 3) Power-Up
+function playSfxPowerUp() {
+  // Rising pitch + triangle flourish
+  const osc = audioCtx.createOscillator();
+  osc.setPeriodicWave(triangleWave);
+  osc.frequency.setValueAtTime(220, audioCtx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.5);
+
+  const gainNode = audioCtx.createGain();
+  gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+  gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.6);
+
+  osc.connect(gainNode).connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.6);
+}
+
+// 4) Coin
+function playSfxCoin() {
+  // Short high pitch ding
+  const osc = audioCtx.createOscillator();
+  osc.setPeriodicWave(squareWave12);
+  osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.1);
+
+  const gainNode = audioCtx.createGain();
+  gainNode.gain.setValueAtTime(0.4, audioCtx.currentTime);
+  gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.15);
+
+  osc.connect(gainNode).connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.2);
+}
+
+// 5) Blip
+function playSfxBlip() {
+  // Super short pulse
+  createSquareOsc(squareWave50, 300, 0.15, 0.4);
+}
+
+// 6) Laser
+function playSfxLaser() {
+  // Quick pitch down
+  const osc = audioCtx.createOscillator();
+  osc.setPeriodicWave(squareWave50);
+  osc.frequency.setValueAtTime(1000, audioCtx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.3);
+
+  const gainNode = audioCtx.createGain();
+  gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
+  gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.35);
+
+  osc.connect(gainNode).connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.4);
+}
+
+// 7) Hurt
+function playSfxHurt() {
+  // Quick high-down squeak
+  const osc = audioCtx.createOscillator();
+  osc.setPeriodicWave(squareWave12);
+  osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.2);
+
+  const gainNode = audioCtx.createGain();
+  gainNode.gain.setValueAtTime(0.4, audioCtx.currentTime);
+  gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.3);
+
+  osc.connect(gainNode).connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.3);
+}
+
+// 8) Pause
+function playSfxPause() {
+  // Brief downward pitch glide, quieter
+  const osc = audioCtx.createOscillator();
+  osc.setPeriodicWave(squareWave50);
+  osc.frequency.setValueAtTime(440, audioCtx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(220, audioCtx.currentTime + 0.2);
+
+  const gainNode = audioCtx.createGain();
+  gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+  gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.25);
+
+  osc.connect(gainNode).connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.25);
+}
+
+// 9) Confirm
+function playSfxConfirm() {
+  // Short double-blip
+  const startTime = audioCtx.currentTime;
+  createSquareOsc(squareWave12, 400, 0.1, 0.4);
+  createSquareOsc(squareWave12, 600, 0.1, 0.4);
+}
+
+// 10) Teleport
+function playSfxTeleport() {
+  // Noise + quick up/down pitch
+  createNoise(0.3, 0.3);
+  const osc = audioCtx.createOscillator();
+  osc.setPeriodicWave(triangleWave);
+  osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.15);
+  osc.frequency.exponentialRampToValueAtTime(300, audioCtx.currentTime + 0.3);
+
+  const gainNode = audioCtx.createGain();
+  gainNode.gain.setValueAtTime(0.4, audioCtx.currentTime);
+  gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.3);
+
+  osc.connect(gainNode).connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.3);
+}
+
+// ----------------------------------------------------
+// 3 Short NES-Style Theme Songs
+// ----------------------------------------------------
+//
+// We'll schedule short loops, each using the 4 channel approach (2 squares, triangle, noise).
+// For demonstration, each "song" is a few measures of pattern that loops until stopped.
+//
+// We'll keep references to the oscillators in a global array so we can stop them.
+
+let activeSongNodes = [];
+
+function scheduleNoteSquare(when, freq, duration, volume, wave) {
+  const osc = audioCtx.createOscillator();
+  osc.setPeriodicWave(wave);
+  osc.frequency.setValueAtTime(freq, when);
+
+  const gainNode = audioCtx.createGain();
+  gainNode.gain.setValueAtTime(volume, when);
+  gainNode.gain.setValueAtTime(volume, when + duration - 0.02);
+  gainNode.gain.linearRampToValueAtTime(0, when + duration);
+
+  osc.connect(gainNode).connect(audioCtx.destination);
+  osc.start(when);
+  osc.stop(when + duration);
+
+  activeSongNodes.push(osc);
+  activeSongNodes.push(gainNode);
+}
+
+function scheduleNoteTriangle(when, freq, duration, volume) {
+  const osc = audioCtx.createOscillator();
+  osc.setPeriodicWave(triangleWave);
+  osc.frequency.setValueAtTime(freq, when);
+
+  const gainNode = audioCtx.createGain();
+  gainNode.gain.setValueAtTime(volume, when);
+  gainNode.gain.setValueAtTime(volume, when + duration - 0.02);
+  gainNode.gain.linearRampToValueAtTime(0, when + duration);
+
+  osc.connect(gainNode).connect(audioCtx.destination);
+  osc.start(when);
+  osc.stop(when + duration);
+
+  activeSongNodes.push(osc);
+  activeSongNodes.push(gainNode);
+}
+
+function scheduleNoise(when, duration, volume) {
+  const bs = audioCtx.createBufferSource();
+  bs.buffer = noiseBuffer;
+  bs.loop = true;
+
+  const gainNode = audioCtx.createGain();
+  gainNode.gain.setValueAtTime(volume, when);
+  gainNode.gain.setValueAtTime(volume, when + duration - 0.02);
+  gainNode.gain.linearRampToValueAtTime(0, when + duration);
+
+  bs.connect(gainNode).connect(audioCtx.destination);
+  bs.start(when);
+  bs.stop(when + duration);
+
+  activeSongNodes.push(bs);
+  activeSongNodes.push(gainNode);
+}
+
+// We'll define short loops of around 4 bars each (just examples).
+// Then we let them loop by scheduling more repeats after a certain interval.
+// This is a simplistic approach. We'll do a single pass for demonstration
+// so you can trigger them repeatedly.
+
+function playSong1() {
+  stopAllSongs(); // stop any currently playing song first
+  const start = audioCtx.currentTime;
+  const tempo = 120; // beats per minute
+  const beatDuration = 60 / tempo; // one quarter note
+  const measure = 4 * beatDuration;
+
+  // Simple chord progression on squares, melody on triangle, noise for percussion.
+
+  // We'll do 2 measures repeated once for demonstration (8 total beats).
+  // Square1 chord stabs
+  scheduleNoteSquare(start + 0*beatDuration, 220, 0.2, 0.3, squareWave12);
+  scheduleNoteSquare(start + 2*beatDuration, 220, 0.2, 0.3, squareWave12);
+  scheduleNoteSquare(start + 4*beatDuration, 261.6, 0.2, 0.3, squareWave12);
+  scheduleNoteSquare(start + 6*beatDuration, 261.6, 0.2, 0.3, squareWave12);
+
+  // Square2 chord stabs (higher octave)
+  scheduleNoteSquare(start + 0*beatDuration, 440, 0.2, 0.2, squareWave50);
+  scheduleNoteSquare(start + 2*beatDuration, 440, 0.2, 0.2, squareWave50);
+  scheduleNoteSquare(start + 4*beatDuration, 523.3, 0.2, 0.2, squareWave50);
+  scheduleNoteSquare(start + 6*beatDuration, 523.3, 0.2, 0.2, squareWave50);
+
+  // Triangle melody
+  scheduleNoteTriangle(start + 1*beatDuration, 392, 1*beatDuration, 0.2);
+  scheduleNoteTriangle(start + 3*beatDuration, 349.2, 1*beatDuration, 0.2);
+  scheduleNoteTriangle(start + 5*beatDuration, 392, 1*beatDuration, 0.2);
+  scheduleNoteTriangle(start + 7*beatDuration, 466.2, 1*beatDuration, 0.2);
+
+  // Noise hi-hat
+  for (let b = 0; b < 8; b++) {
+    scheduleNoise(start + b*beatDuration, 0.05, 0.15);
+  }
+}
+
+function playSong2() {
+  stopAllSongs();
+  const start = audioCtx.currentTime;
+  const tempo = 100;
+  const beatDuration = 60 / tempo; 
+  // A short repeated pattern
+
+  // Square1
+  scheduleNoteSquare(start + 0*beatDuration, 330, 0.4, 0.25, squareWave12);
+  scheduleNoteSquare(start + 1*beatDuration, 294, 0.4, 0.25, squareWave12);
+  scheduleNoteSquare(start + 2*beatDuration, 262, 0.4, 0.25, squareWave12);
+  scheduleNoteSquare(start + 3*beatDuration, 294, 0.4, 0.25, squareWave12);
+
+  // Square2
+  scheduleNoteSquare(start + 0*beatDuration, 660, 0.4, 0.15, squareWave50);
+  scheduleNoteSquare(start + 1*beatDuration, 588, 0.4, 0.15, squareWave50);
+  scheduleNoteSquare(start + 2*beatDuration, 524, 0.4, 0.15, squareWave50);
+  scheduleNoteSquare(start + 3*beatDuration, 588, 0.4, 0.15, squareWave50);
+
+  // Triangle (bass line)
+  scheduleNoteTriangle(start + 0*beatDuration, 165, 0.4, 0.2);
+  scheduleNoteTriangle(start + 1*beatDuration, 147, 0.4, 0.2);
+  scheduleNoteTriangle(start + 2*beatDuration, 131, 0.4, 0.2);
+  scheduleNoteTriangle(start + 3*beatDuration, 147, 0.4, 0.2);
+
+  // Noise (snare) on beats 1 and 3
+  scheduleNoise(start + 1*beatDuration, 0.1, 0.3);
+  scheduleNoise(start + 3*beatDuration, 0.1, 0.3);
+}
+
+function playSong3() {
+  stopAllSongs();
+  const start = audioCtx.currentTime;
+  const tempo = 140;
+  const beatDuration = 60 / tempo;
+
+  // A quick chord progression:
+  // measure = 4 beats
+  for (let m = 0; m < 2; m++) {
+    const measureStart = start + m * 4 * beatDuration;
+
+    // Square1 chord root
+    scheduleNoteSquare(measureStart + 0, (m % 2 === 0) ? 261.6 : 293.7, 0.4, 0.3, squareWave12);
+    scheduleNoteSquare(measureStart + 1*beatDuration, (m % 2 === 0) ? 261.6 : 293.7, 0.4, 0.3, squareWave12);
+    scheduleNoteSquare(measureStart + 2*beatDuration, (m % 2 === 0) ? 261.6 : 293.7, 0.4, 0.3, squareWave12);
+    scheduleNoteSquare(measureStart + 3*beatDuration, (m % 2 === 0) ? 261.6 : 293.7, 0.4, 0.3, squareWave12);
+
+    // Square2 top note
+    scheduleNoteSquare(measureStart + 0, (m % 2 === 0) ? 392 : 440, 0.4, 0.2, squareWave50);
+    scheduleNoteSquare(measureStart + 1*beatDuration, (m % 2 === 0) ? 392 : 440, 0.4, 0.2, squareWave50);
+    scheduleNoteSquare(measureStart + 2*beatDuration, (m % 2 === 0) ? 392 : 440, 0.4, 0.2, squareWave50);
+    scheduleNoteSquare(measureStart + 3*beatDuration, (m % 2 === 0) ? 392 : 440, 0.4, 0.2, squareWave50);
+
+    // Triangle fill
+    scheduleNoteTriangle(measureStart + 0.5*beatDuration, 523.3, 0.4, 0.2);
+    scheduleNoteTriangle(measureStart + 2.5*beatDuration, 587.3, 0.4, 0.2);
+
+    // Noise percussion
+    scheduleNoise(measureStart + 1*beatDuration, 0.05, 0.25);
+    scheduleNoise(measureStart + 3*beatDuration, 0.05, 0.25);
+  }
+}
+
+// ----------------------------------------------------
+// Stop All Songs
+// ----------------------------------------------------
+//
+// We'll simply disconnect all active nodes.
+function stopAllSongs() {
+  activeSongNodes.forEach(node => {
+    try {
+      node.stop();
+    } catch (e) {
+      // not all nodes have stop(), ignore
+    }
+    try {
+      node.disconnect();
+    } catch (e) {
+      // ignore
+    }
+  });
+  activeSongNodes = [];
+}
+</script>
+
+</body>
+</html>
